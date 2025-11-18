@@ -20,34 +20,47 @@ static int is_word(char c) {
 }
 
 char** tokenize(const char *line, int *token_count) {
-    char **tokens = malloc(TOKEN * sizeof(char *));
+    size_t cap = 16;
+    char **tokens = malloc(cap * sizeof(char*));
+    if (!tokens) {
+        perror("malloc");
+        *token_count = 0;
+        return NULL;
+    }
     *token_count = 0;
     const char *p = line;
 
     while (1) {
         if (*p == '\0' || *p == '\n' || *p == '#') break;
 
-        if (is_space(*p)) {
-            p++;
-            continue;
-        }
+        if (is_space(*p)) { p++; continue; }
 
         if (*p == '<' || *p == '>' || *p == '|') {
+            if (*token_count + 2 >= cap) {
+                cap *= 2;
+                char **nt = realloc(tokens, cap * sizeof(char*));
+                if (!nt) { perror("realloc"); break; }
+                tokens = nt;
+            }
             char *t = malloc(2);
-            t[0] = *p;
-            t[1] = '\0';
+            if (!t) { perror("malloc"); break; }
+            t[0] = *p; t[1] = '\0';
             tokens[(*token_count)++] = t;
             p++;
             continue;
         }
 
         const char *start = p;
-        while (is_word(*p)) {
-            p++;
-        }
-
+        while (is_word(*p)) p++;
         size_t len = p - start;
+        if (*token_count + 2 >= cap) {
+            cap *= 2;
+            char **nt = realloc(tokens, cap * sizeof(char*));
+            if (!nt) { perror("realloc"); break; }
+            tokens = nt;
+        }
         char *word = malloc(len + 1);
+        if (!word) { perror("malloc"); break; }
         strncpy(word, start, len);
         word[len] = '\0';
         tokens[(*token_count)++] = word;
@@ -73,17 +86,15 @@ typedef struct{
 typedef struct{
     Command *commands; //array of commands
     int command_count; 
-    int conditional; //0: non , 1: AND, -1: OR
+    int conditional;
 } Job;
 
-/* shell control flags set by builtins */
 static int shell_terminate = 0; /* 0 = continue, 1 = exit, 2 = die */
 static int shell_exit_code = EXIT_SUCCESS;
 
 static int last_exit_status = 0;
 static int shell_interactive = 1;
 
-/* function prototypes */
 void free_job(Job *job);
 
 char* resolve_program(const char *name) {
@@ -114,7 +125,7 @@ int builtin_cd(Command *cmd) {
         return -1;
     }
     if (chdir(cmd->args[1]) != 0) {
-        perror("cd");
+        fprintf(stderr, "cd: No such file or directory\n");
         return -1;
     }
     return 0;
@@ -149,7 +160,6 @@ int builtin_which(Command *cmd) {
 
     char *path = resolve_program(name);
     if (path == NULL) {
-        fprintf(stderr, "%s: command not found\n", name);
         return -1;
     }
     printf("%s\n", path);
@@ -165,13 +175,12 @@ int builtin_exit(Command *cmd) {
 }
 
 int builtin_die(Command *cmd){
-    /* print arguments (not the command name) */
     for (int i = 1; i < cmd->arg_count; i++){
         if (i > 1) printf(" ");
         printf("%s", cmd->args[i]);
     }
     if (cmd->arg_count > 1) printf("\n");
-    shell_terminate = 2; /* indicate die */
+    shell_terminate = 2;
     shell_exit_code = EXIT_FAILURE;
     return -1;
 }
@@ -227,9 +236,7 @@ int execute_pipeline(Job *job) {
         }
 
         if (pid == 0) {
-            /* If batch mode (non-interactive), and this child has no explicit input file
-               and is the first process in pipeline, redirect stdin to /dev/null. */
-            if (!shell_interactive && i == 0 && job->commands[i].input_file == NULL) {
+            if (!shell_interactive && job->commands[i].input_file == NULL) {
                 int nd = open("/dev/null", O_RDONLY);
                 if (nd >= 0) {
                     if (dup2(nd, STDIN_FILENO) < 0) {
@@ -270,16 +277,33 @@ int execute_pipeline(Job *job) {
                 close(pipes[j][1]);
             }
 
+            const char *name = job->commands[i].args[0];
+            if (strcmp(name, "cd") == 0) {
+                int r = builtin_cd(&job->commands[i]);
+                _exit(r == 0 ? 0 : 1);
+            } else if (strcmp(name, "pwd") == 0) {
+                int r = builtin_pwd(&job->commands[i]);
+                _exit(r == 0 ? 0 : 1);
+            } else if (strcmp(name, "which") == 0) {
+                int r = builtin_which(&job->commands[i]);
+                _exit(r == 0 ? 0 : 1);
+            } else if (strcmp(name, "exit") == 0) {
+                _exit(0);
+            } else if (strcmp(name, "die") == 0) {
+                (void)builtin_die(&job->commands[i]);
+                _exit(1);
+            }
+
             char *path = resolve_program(job->commands[i].args[0]);
             if (path == NULL) {
                 fprintf(stderr, "%s: command not found\n", job->commands[i].args[0]);
-                exit(1);
+                _exit(1);
             }
 
             execv(path, job->commands[i].args);
             perror("execv");
             free(path);
-            exit(1);
+            _exit(1);
         }
         else {
             pids[i] = pid;
@@ -336,21 +360,35 @@ int execute_job(Job *job, int last_exit_status) {
 
     if (job->command_count == 1 && job->commands[0].arg_count > 0) {
         const char *cmd_name = job->commands[0].args[0];
-
         if (strcmp(cmd_name, "cd") == 0) {
             return builtin_cd(&job->commands[0]);
-        } else if (strcmp(cmd_name, "pwd") == 0) {
-            return builtin_pwd(&job->commands[0]);
-        } else if (strcmp(cmd_name, "which") == 0) {
-            return builtin_which(&job->commands[0]);
         } else if (strcmp(cmd_name, "exit") == 0) {
-            return builtin_exit(&job->commands[0]);
+            shell_terminate = 1;
+            shell_exit_code = EXIT_SUCCESS;
+            return 0;
         } else if (strcmp(cmd_name, "die") == 0) {
-            return builtin_die(&job->commands[0]);
+            int r = builtin_die(&job->commands[0]);
+            shell_terminate = 2;
+            shell_exit_code = EXIT_FAILURE;
+            return r;
         }
     }
 
     int exit_status = execute_pipeline(job);
+
+    for (int i = 0; i < job->command_count; i++) {
+        if (job->commands[i].arg_count > 0) {
+            const char *nm = job->commands[i].args[0];
+            if (strcmp(nm, "exit") == 0) {
+                shell_terminate = 1;
+                shell_exit_code = EXIT_SUCCESS;
+            } else if (strcmp(nm, "die") == 0) {
+                shell_terminate = 2;
+                shell_exit_code = EXIT_FAILURE;
+            }
+        }
+    }
+
     return exit_status;
 }
 
@@ -364,7 +402,6 @@ void process_token(char **tokens, int token_count) {
     job.conditional = 0;
     job.commands = NULL;
 
-    /* leading conditional */
     if (idx < token_count) {
         if (strcmp(tokens[idx], "and") == 0) {
             job.conditional = 1;
@@ -414,7 +451,7 @@ void process_token(char **tokens, int token_count) {
 
         if (strcmp(t, "<") == 0) {
             if (idx + 1 >= token_count) goto parse_error;
-            if (saw_pipe) goto parse_error; /* per spec simplification */
+            if (saw_pipe) goto parse_error;
             if (cur_input) goto parse_error; /* duplicate */
             cur_input = strdup(tokens[idx + 1]);
             idx += 2;
@@ -469,7 +506,7 @@ parse_error:
 }
 
 int read_input(FILE *stream, char **line_buffer_ptr, size_t *buffer_size_ptr) {
-    (void)buffer_size_ptr; /* unused with read()-based reader */
+    (void)buffer_size_ptr;
     int fd = fileno(stream);
     size_t cap = 128;
     size_t len = 0;
@@ -525,12 +562,12 @@ int run_shell(FILE *stream, int i_mode) {
     int read_status;
     shell_interactive = i_mode;
     if (i_mode){
-        write(1, "Welcome to my shell!\n", 21);
+        write(1, "Welcome to my shell!\n", sizeof("Welcome to my shell!\n") - 1);
     }
 
     while (1) {
         if (i_mode){
-            write(1, "mysh> ", 6);
+            write(1, "mysh> ", sizeof("mysh> ") - 1);
         }
         read_status = read_input(stream, &line_buffer, &buffer_size); 
         if (read_status <= 0) {
@@ -551,7 +588,7 @@ int run_shell(FILE *stream, int i_mode) {
     }
 
     if (i_mode){
-        write(1, "Exiting my shell.\n", 18);
+        write(1, "exiting.\n", sizeof("exiting.\n") - 1);
     }
     if (line_buffer != NULL){
         free(line_buffer);
