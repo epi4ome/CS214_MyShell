@@ -134,8 +134,12 @@ char *resolve(const char *name) {
 }
 
 int builtin_cd(Command *cmd) {
-    if (cmd->arg_count != 2) {
+    if (cmd->arg_count < 2) {
         fprintf(stderr, "cd: missing argument\n");
+        return 1;
+    }
+    if (cmd->arg_count > 2) {
+        fprintf(stderr, "cd: too many arguments\n");
         return 1;
     }
     if (chdir(cmd->args[1]) != 0) {
@@ -203,7 +207,7 @@ int b_exit(Command *cmd) {
 }
 
 int b_die(Command *cmd) {
-    for (size_t i = 1; i < cmd->arg_count; i++) { // Changed i from int to size_t
+    for (size_t i = 1; i < cmd->arg_count; i++) { 
         if (i > 1) printf(" ");
         printf("%s", cmd->args[i]);
     }
@@ -266,7 +270,7 @@ int redirect_output(const char *filename) {
 }
 
 int execute_pipeline(Job *job, Mode mode) {
-    size_t num_commands = job->command_count; // Changed from int to size_t
+    size_t num_commands = job->command_count; 
     pid_t pids[num_commands];
     int pipes[num_commands - 1][2];
     int last_exit_status = 0;
@@ -283,14 +287,14 @@ int execute_pipeline(Job *job, Mode mode) {
         }
     }
 
-    for (size_t i = 0; i < num_commands - 1; i++) { // Changed i from int to size_t
+    for (size_t i = 0; i < num_commands - 1; i++) { 
         if (pipe(pipes[i]) < 0) {
             perror("pipe");
             return 1;
         }
     }
 
-    for (size_t i = 0; i < num_commands; i++) { // Changed i from int to size_t
+    for (size_t i = 0; i < num_commands; i++) { 
         Command *current_cmd = &job->commands[i];
         if (current_cmd->arg_count == 0) return 1;
 
@@ -299,8 +303,8 @@ int execute_pipeline(Job *job, Mode mode) {
 
         if (pids[i] < 0) {
             perror("fork");
-            for (size_t j = 0; j < num_commands - 1; j++) { close(pipes[j][0]); close(pipes[j][1]); } // Changed j from int to size_t
-            for (size_t j = 0; j < i; j++) { waitpid(pids[j], NULL, 0); } // Changed j from int to size_t
+            for (size_t j = 0; j < num_commands - 1; j++) { close(pipes[j][0]); close(pipes[j][1]); } 
+            for (size_t j = 0; j < i; j++) { waitpid(pids[j], NULL, 0); } 
             return 1;
         }
 
@@ -320,7 +324,7 @@ int execute_pipeline(Job *job, Mode mode) {
                 if (redirect_output(current_cmd->output_file) < 0) exit(1);
             }
 
-            for (size_t j = 0; j < num_commands - 1; j++) { close(pipes[j][0]); close(pipes[j][1]); } // Changed j from int to size_t
+            for (size_t j = 0; j < num_commands - 1; j++) { close(pipes[j][0]); close(pipes[j][1]); } 
 
             int is_builtin = (strcmp(cmd_name, "pwd") == 0 || strcmp(cmd_name, "which") == 0 ||
                               strcmp(cmd_name, "exit") == 0 || strcmp(cmd_name, "die") == 0);
@@ -342,12 +346,12 @@ int execute_pipeline(Job *job, Mode mode) {
         }
     } 
 
-    for (size_t i = 0; i < num_commands - 1; i++) { // Changed i from int to size_t
+    for (size_t i = 0; i < num_commands - 1; i++) { 
         close(pipes[i][0]);
         close(pipes[i][1]);
     }
 
-    for (size_t i = 0; i < num_commands; i++) { // Changed i from int to size_t
+    for (size_t i = 0; i < num_commands; i++) {
         int status;
         waitpid(pids[i], &status, 0);
         if (i == num_commands - 1) last_exit_status = status; 
@@ -364,7 +368,7 @@ int execute_pipeline(Job *job, Mode mode) {
 
 void free_job(Job *job){
     if (!job || !job->commands) return;
-    for (size_t i = 0; i < job->command_count; i++) { // Changed i from int to size_t
+    for (size_t i = 0; i < job->command_count; i++) { 
         Command *c = &job->commands[i];
         if (c->args) {
             free(c->args);
@@ -388,7 +392,7 @@ int execute_job(Job *job, Mode mode) {
 void process_tokens(char **tokens, size_t token_count, Mode mode) {
     if (token_count == 0) return;
 
-    size_t idx = 0; // Changed from int to size_t
+    size_t idx = 0; 
     Job job;
     job.command_count = 0;
     job.conditional = 0;
@@ -409,9 +413,9 @@ void process_tokens(char **tokens, size_t token_count, Mode mode) {
     job.commands = calloc(token_count / 2 + 1, sizeof(Command));
     if (!job.commands) { perror("malloc"); return; }
 
-    ssize_t cmd_i = -1; // Changed from int to ssize_t (retaining -1 start)
+    ssize_t cmd_i = -1; 
     char **arglist = NULL;
-    size_t argcap = 0, arglen = 0; // Changed from int to size_t
+    size_t argcap = 0, arglen = 0; 
     char *cur_input = NULL, *cur_output = NULL;
     int syntax_error = 0;
 
@@ -478,7 +482,7 @@ void process_tokens(char **tokens, size_t token_count, Mode mode) {
         job.commands[cmd_i].arg_count = arglen;
         job.commands[cmd_i].input_file = cur_input;
         job.commands[cmd_i].output_file = cur_output;
-        job.command_count = (size_t)(cmd_i + 1); // Cast to size_t for consistency
+        job.command_count = (size_t)(cmd_i + 1); 
 
         execute_job(&job, mode);
 
@@ -552,7 +556,7 @@ void run_shell(int fd, Mode mode) {
         char *line = read_line(fd);
         if (!line) break;
 
-        size_t token_count = 0; // Changed from int to size_t
+        size_t token_count = 0; 
         char **tokens = tokenize(line, &token_count);
         free(line);
 
