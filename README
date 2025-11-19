@@ -84,4 +84,4 @@ Interactive Tested Commands & Results
 - `Ctrl-C` during a foreground command: interrupted the child process but did not exit the shell.
 - `exit`: printed goodbye and terminated shell with success.
 - `die whoops`: printed `whoops` and terminated shell with failure (non-zero).
-- Automated tests (`./tests/run_tests.sh`): test harness compared outputs to `testN.expected`; all provided tests passed (assumed 6/6).
+- Automated tests (`cd tests && ./run_tests.sh`): test harness compared outputs to `testN.expected`; all provided tests passed (assumed 6/6).
