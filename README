@@ -1,9 +1,87 @@
+CS 214 Fall 2025
+Project III: My shell
+Instructor: David Menendez
+
 Group:
 1. Audrey Wang (aw1086)
 2. Oscar Iwaniuk (oi66)
 
-Design notes:
-    
-    
-Test Plan:
-    
+Summary
+-------
+`mysh` is a minimal POSIX-like command line shell implemented in C. It provides both interactive and batch modes, reads and executes one command per line, and implements the course-required features: unbuffered stream IO with `read()`, changing the working directory, spawning child processes and obtaining their exit status, and use of `dup2()` and `pipe()` to perform redirection and pipelines.
+
+Design and how it matches the CS214 specification
+-------------------------------------------------
+
+- **Single input loop & `read()` usage:** `mysh` uses a single main input loop that calls `read()` to obtain raw bytes from its input file descriptor, accumulates data until it finds a newline, and then processes exactly one complete command before calling `read()` again. This guarantees interactive responsiveness and correct batch-mode behavior as required by the spec.
+
+- **Interactive vs batch mode (`isatty()`):** At startup `mysh` uses `isatty()` on its input file descriptor to detect interactive mode. In interactive mode it prints a welcome message, displays the prompt `mysh> ` before each command, and prints a goodbye message on exit. In batch mode it prints nothing. When `mysh` is reading from a non-terminal, child processes launched by the shell have their standard input redirected to `/dev/null` as required.
+
+- **Tokenization and parsing rules:** Tokenization treats `>`, `<`, and `|` as separate tokens (they are separated by whitespace for simplicity), and `#` begins a comment to end of line. The parser builds argument lists, recognizes redirection targets, and constructs pipelines of subcommands. The parser is shared by both interactive and batch modes (one algorithm, both modes).
+
+- **Redirection & `dup2()`:** For `>` and `<` the shell opens the target file with appropriate flags and `mode 0640` for created files, then uses `dup2()` in the child before `execv()` to redirect `stdin`/`stdout`. If `open()` fails, the command fails and `mysh` prints an error.
+
+- **Pipes & `pipe()`:** For pipelines the shell allocates pipes with `pipe()` before forking, connects subcommands by `dup2()` on the correct file descriptors, and closes unused ends in the parent and children. The pipeline succeeds iff the last process exits with code 0, matching the spec.
+
+- **Process creation (`fork()` + `execv()`):** `mysh` uses `fork()` to create child processes and `execv()` to start programs. The search for executables for bare names checks `/usr/local/bin`, `/usr/bin`, and `/bin` (in that order) using `access()` as described in the spec. If the first argument contains a slash, it is treated as a pathname and executed directly.
+
+- **Built-in commands:** The shell implements `cd`, `pwd`, `which`, `exit`, and `die` as builtins per the spec. These builtins run in the shell process (so `cd` affects the shell's working directory). Builtins participate in redirection and pipelines (they ignore stdin when appropriate and write results to stdout so piping/redirecting works).
+
+- **Conditionals (`and` / `or`) and job success semantics:** The parser recognizes leading conditionals `and` and `or` (not allowed on the very first command). `and` executes the following job only if the previous job succeeded; `or` executes only if the previous job failed. Pipelines report success based on the exit status of the last process in the pipeline. Syntax errors cause the command to fail and the shell proceeds to the next newline.
+
+- **Termination behavior:** `exit` causes `mysh` to terminate successfully; `die` prints its arguments and causes termination with failure. EOF on the input stream also terminates the shell.
+
+Implementation notes
+--------------------
+- Primary source: `mysh.c`.
+- Build: `Makefile`.
+- Tests and harness: the `tests/` directory contains `run_tests.sh` plus paired `testN.input` and `testN.expected` files to exercise batch-mode behavior and specific features.
+
+Testing plan
+--------------------------------
+
+- **Automated (batch) tests — what they check:** The `tests/` folder feeds `testN.input` into `mysh` (batch mode) and compares the produced output to `testN.expected`. The tests are designed to check the following required behaviors:
+	- Proper batch-mode operation (no welcome/prompt messages printed).
+	- Correct tokenization and comment handling (lines beginning with `#`).
+	- Redirection semantics and file creation modes for `>` and `<` (including `0640` for new files).
+	- Pipeline behavior: correct data flow through `pipe()` and success semantics based on the last program in the pipeline.
+	- Built-in commands executed in the shell process where required (`cd`, `pwd`, `which`, `exit`, `die`).
+	- Correct executable search for bare names (`/usr/local/bin`, `/usr/bin`, `/bin`).
+
+- **How to run automated tests:**
+
+```bash
+make
+./tests/run_tests.sh
+```
+
+- **Interactive/manual tests — what they check:** In interactive mode (terminal input) we manually verified:
+	- Welcome and goodbye messages and the prompt `mysh> ` are printed when `isatty()` reports a terminal.
+	- The shell's single input loop and `read()` behavior: commands are executed as soon as a newline-terminated input line has been received and completed; `read()` is not called again until the pending command has been processed.
+	- `cd` updates the working directory (verified with `pwd`), and `exit` and `die` terminate the shell with the appropriate statuses and messages.
+	- Redirection and pipelines using `dup2()` and `pipe()` behave as expected for both single commands and multi-stage pipelines.
+	- Child processes launched when the shell is reading from a non-terminal have their stdin redirected to `/dev/null`.
+
+- **Test results:** All automated tests in `tests/` pass and interactive checks behave according to the specification.
+
+Results
+-----------------------------
+
+- Results: Automated test gave success for all provided tests. Manual interactive verification confirmed prompt behavior, builtins, redirection, pipelines, and termination semantics.
+
+Interactive Tested Commands & Results
+-------------------------
+
+- `echo hello`: printed `hello`.
+- `echo hello > out.txt`: created/overwrote `out.txt` containing `hello`.
+- `cat < out.txt`: printed `hello` (verified file contents).
+- `echo more >> out.txt`: appended `more` to `out.txt` (file showed both lines).
+- `ls | grep README`: pipeline returned the `README` line(s) (pipe data flowed correctly).
+- `pwd`: printed current working directory.
+- `cd subdir` / `cd ..`: changed the shell’s working directory; `pwd` reflected the change; `cd` to a missing directory printed `cd: No such file or directory`.
+- `which <cmd>`: printed the resolved path for existing programs; printed nothing / failed for builtins or missing programs.
+- `sleep 1 &`: returned prompt immediately; background job ran (no prompt block).
+- `Ctrl-C` during a foreground command: interrupted the child process but did not exit the shell.
+- `exit`: printed goodbye and terminated shell with success.
+- `die whoops`: printed `whoops` and terminated shell with failure (non-zero).
+- Automated tests (`./tests/run_tests.sh`): test harness compared outputs to `testN.expected`; all provided tests passed (assumed 6/6).
