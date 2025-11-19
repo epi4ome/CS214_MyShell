@@ -26,7 +26,7 @@ static int is_word(char c) {
              c == '<' || c == '>' || c == '|');
 }
 
-char **tokenize(const char *line, int *token_count) {
+char **tokenize(const char *line, size_t *token_count) {
     size_t cap = 16; 
     char **tokens = malloc(cap * sizeof(char*));
     if (!tokens) { 
@@ -88,8 +88,8 @@ char **tokenize(const char *line, int *token_count) {
     return tokens;
 }
 
-void free_tokens(char **tokens, int count) {
-    for (int i = 0; i < count; i++) {
+void free_tokens(char **tokens, size_t count) {
+    for (size_t i = 0; i < count; i++) {
         if (tokens[i] != NULL) free(tokens[i]);
     }
     free(tokens);
